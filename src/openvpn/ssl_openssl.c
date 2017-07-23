@@ -1077,6 +1077,14 @@ tls_ctx_use_external_private_key(struct tls_root_ctx *ctx,
     ASSERT(pkey); /* NULL before SSL_CTX_use_certificate() is called */
     pub_rsa = EVP_PKEY_get0_RSA(pkey);
 
+    /* Certificate might not be RSA but DSA or EC */
+    if (!pub_rsa)
+    {
+        crypto_msg (M_ERR, "management-external-key requires a RSA certificate");
+        goto err;
+    }
+        
+
     /* initialize RSA object */
     const BIGNUM *n = NULL;
     const BIGNUM *e = NULL;
@@ -1695,6 +1703,34 @@ print_details(struct key_state_ssl *ks_ssl, const char *prefix)
                 openvpn_snprintf(s2, sizeof(s2), ", %d bit DSA",
                                  DSA_bits(dsa));
             }
+#ifndef OPENSSL_NO_EC            
+            else if (EVP_PKEY_id(pkey) == EVP_PKEY_EC && EVP_PKEY_get0_EC_KEY(pkey) != NULL)
+            {
+                EC_KEY *ec = EVP_PKEY_get0_EC_KEY(pkey);
+                const EC_GROUP *group = EC_KEY_get0_group(ec);
+                BIO *bio = BIO_new(BIO_s_mem());
+                char ecparamstr[1024];
+
+                CLEAR(ecparamstr);
+
+                ECPKParameters_print(bio, group, 0);
+
+                BIO_read(bio, ecparamstr, sizeof(ecparamstr) - 1);
+                /* replace '\n' with ' ' to have a one-line string */
+                for (int i=0; i < sizeof(ecparamstr); i++)
+                {
+                    if (ecparamstr[i] == '\n')
+                    {
+                        ecparamstr[i] = ' ';
+                    }
+                }
+                
+                openvpn_snprintf(s2, sizeof(s2), ", %d bit EC, %s",
+                                 EC_GROUP_order_bits(group), ecparamstr);
+                BIO_free(bio);
+                
+            }
+#endif
             EVP_PKEY_free(pkey);
         }
         X509_free(cert);
